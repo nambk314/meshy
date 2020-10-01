@@ -426,6 +426,24 @@ var Markers = (function() {
       this.object.geometry = geo;
 
       return this;
+    },
+    setFromVertices: function(vertices) {
+      if (!vertices) return;
+      this.object.position.setScalar(0);
+      this.object.scale.setScalar(1);
+
+      var geo = new THREE.Geometry();
+      var newVertices = geo.vertices;
+      newVertices.push(vertices[0]);
+      for (var i = 1; i < vertices.length - 1; i++) {
+        newVertices.push(vertices[i])
+        newVertices.push(vertices[i])
+      }
+      newVertices.push(vertices[vertices.length - 1]);
+      this.object.geometry = geo;
+
+      return this;
+
     }
   });
 

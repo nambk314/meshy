@@ -722,7 +722,8 @@ var Repair = (function() {
   }
 
   return {
-    generatePatchGeometry: generatePatchGeometry
+    generatePatchGeometry: generatePatchGeometry,
+    generateAdjacencyMap: generateAdjacencyMap
   };
 
 })();

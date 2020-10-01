@@ -233,6 +233,7 @@ var Calculate = (function() {
 
       // indexed faces - each triple of indices represents a face
       if (index !== null) {
+        console.log("buffered not null")
         for (var i = 0, l = index.count; i < l; i += 3) {
           var a = index.getX(i);
           var b = index.getX(i + 1);
@@ -250,6 +251,8 @@ var Calculate = (function() {
       // else, each three contiguous verts in position attribute constitute a
       // face
       else {
+        
+        console.log("buffered null")
         for (var i = 0, l = position.count; i < l; i += 3) {
           va.fromBufferAttribute(position, i).applyMatrix4(matrixWorld);
           vb.fromBufferAttribute(position, i + 1).applyMatrix4(matrixWorld);
@@ -262,15 +265,16 @@ var Calculate = (function() {
       }
     }
     else {
+      console.log("not buffered")
       var faces = geo.faces, vertices = geo.vertices;
 
       for (var f = 0; f < faces.length; f++) {
         var face = faces[f];
 
-        _faceVertices(face, vertices, matrixWorld, va, vb, vc);
+        var newPoints = _faceVertices(face, vertices, matrixWorld, va, vb, vc);
         normal.copy(face.normal).transformDirection(matrixWorld);
 
-        callback(va, vb, vc, normal, f);
+        callback(newPoints[0], newPoints[1], newPoints[2], normal, f);
       }
     }
   }
@@ -394,6 +398,170 @@ var Calculate = (function() {
     }
 
     return result;
+  }
+// Get the shortest path between 2 points on the mesh using A* algorithm
+  function _surfaceLength(pointA, pointB, faceA, faceB, mesh) {
+
+    // vertex precision factor
+    var p = 1e5;
+    var result = {}
+    var length = 0;
+    var curMesh = mesh[0];
+    var matrix = curMesh.matrixWorld;
+    // Set up for A* algorithm
+    var openListComparator = function (a, b) { return fScore.get(vertexHash(a, p)) - fScore.get(vertexHash(b, p)); }
+
+    var openList = new PriorityQueue({
+      comparator: openListComparator,
+      strategy: PriorityQueue.BHeapStrategy
+    });
+
+    //Saving the hash instead of the object
+    var openSet = new Set()
+    var closedList = new Set()
+
+    var cameFrom = new Map()
+    var gScore = new Map()
+    var fScore = new Map()
+
+    // store the segments forming the intersection
+    var adjacencyMap = createAdjacencyMap(curMesh.geometry.vertices, curMesh.geometry.faces, matrix);
+    var vertices = [];
+
+    //Include start and end point to the adjacency map
+    addPointToAdjacencyMap(curMesh.geometry.vertices, faceA, pointA, adjacencyMap, matrix);
+    addPointToAdjacencyMap(curMesh.geometry.vertices, faceB, pointB, adjacencyMap, matrix);
+
+    
+    var hashA = vertexHash(pointA, p)
+    gScore.set(hashA, 0);
+    fScore.set(hashA, pointA.distanceTo(pointB))
+    openList.queue(pointA)
+    openSet.add(hashA)
+    var shortestPath = []
+    while (openList.length != 0) {
+      var curPoint = openList.dequeue();
+      let curHash = vertexHash(curPoint, p)
+      if (curPoint.distanceTo(pointB) == 0) {
+        shortestPath = pathTo(cameFrom, adjacencyMap, curHash)
+        break;
+      }
+      
+      
+      closedList.add(curHash)
+      let curData = adjacencyMap[curHash]
+
+      for (var i = 0; i < curData.neighbors.length; i++) {
+        
+        var neighbor = curData.neighbors[i];
+        var neighborHash = vertexHash(neighbor, p)
+        if (closedList.has(neighbor)) {
+          continue;
+        }
+        var tentative_g = gScore.get(curHash) + curPoint.distanceTo(neighbor)
+        var g_neighbor = gScore.get(neighborHash)
+
+        if (!openSet.has(neighborHash) || tentative_g < g_neighbor) {
+          cameFrom.set(neighborHash, curHash)
+          gScore.set(neighborHash, tentative_g)
+          fScore.set(neighborHash, gScore.get(neighborHash) + neighbor.distanceTo(pointB))
+          if (!openSet.has(neighborHash)) {
+            openList.queue(neighbor)
+            openSet.add(neighborHash)
+          } else {
+            //Need to rescore because we change neighbor's fscore
+            rescoreOpenList(openList, neighbor)
+          }
+        }
+      }
+    }
+    result["shortestPath"] = shortestPath
+    result["length"] = fScore.get(vertexHash(pointB, p))
+    return result;
+  }
+
+  function addPointToAdjacencyMap(vertices, face, point, adjacencyMap, matrix) {
+    p = 1e5;
+    var hash = vertexHash(point, p);
+    console.log("hash A & B: " + hash);
+    var faceVerts = _faceVertices(face, vertices, matrix)
+    var data = {
+      vertex: point,
+      neighbors: []
+    }
+    for (var i = 0; i < faceVerts.length; i++) {
+      addAdjacentVertex(faceVerts[i], data)
+      //Add the current point to the neighbor list
+      var curHash = vertexHash(faceVerts[i], p)
+      var curData = adjacencyMap[curHash]
+      addAdjacentVertex(point, curData)
+      console.log("distance to point" + point.distanceTo(faceVerts[i]));
+    }
+    adjacencyMap[hash] = data;
+  }
+
+  function createAdjacencyMap(vertices, faces, matrix) {
+    p = 1e5;
+    var adjacencyMap = {};
+    for (var f = 0; f<faces.length; f++) {
+      var face = faces[f];
+      var faceVerts = _faceVertices(face, vertices, matrix)
+      for (var v=0; v<3;v++) {
+        var vertex = faceVerts[v];
+        var hash = vertexHash(vertex, p);
+
+        // the other two vertices for the face; we will add these to adjacencyMap
+        var vertex1 = faceVerts[(v+1)%3];
+        var vertex2 = faceVerts[(v+2)%3];
+
+        if (!(hash in adjacencyMap)) {
+          adjacencyMap[hash] = {
+            vertex: vertex,
+            neighbors: []
+          };
+        }
+
+        var data = adjacencyMap[hash];
+        addAdjacentVertex(vertex1, data);
+        addAdjacentVertex(vertex2, data);
+      }
+
+    }
+    return adjacencyMap
+
+  }
+
+  //Helper for A* algorithm
+  function pathTo(camefrom, adjacencyMap, hash) {
+    var path = []
+    var curPoint = adjacencyMap[hash].vertex;
+    while(camefrom.get(hash)) {
+      path.push(curPoint)
+      hash = camefrom.get(hash)
+      curPoint = adjacencyMap[hash].vertex;
+    }
+    path.push(curPoint)
+    return path;
+
+  }
+//Helper for A* algorithm
+  function rescoreOpenList(openList, point) {
+    var tempList = []
+    while(openList.length != 0 && openList.peek().distanceTo(point) != 0) {
+      tempList.push(openList.dequeue())
+    }
+    if (openList.length != 0) {
+      tempList.push(openList.dequeue())
+    }
+    for (let i = 0; i < tempList.length; i++) {
+      openList.queue(tempList[i])
+    }
+  }
+
+  function addAdjacentVertex(vertex, data) {
+    // index of the vertex in the existing adjacency list of data.vertex
+    var idx = data.neighbors.indexOf(vertex);
+    if (idx==-1) data.neighbors.push(vertex);
   }
 
   // gets the contour (object like { segments, boundingBox, area, length })
@@ -685,6 +853,7 @@ var Calculate = (function() {
     surfaceArea: _surfaceArea,
     volume: _volume,
     centerOfMass: _centerOfMass,
+    surFaceLength: _surfaceLength,
     crossSection: _crossSection,
     nearestContourToPoints: _nearestContourToPoints,
     planarConvexHull: _planarConvexHull,

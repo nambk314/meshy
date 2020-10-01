@@ -256,6 +256,8 @@ var Measurement = (function() {
   Measurement.Types = {
     none: "none",
     length: "length",
+    //TODO: add sufaceLength Type
+    surfaceLength: "surfaceLength",
     angle: "angle",
     circle: "circle",
     crossSection: "crossSection",
@@ -321,6 +323,15 @@ var Measurement = (function() {
         pparams.material = this.meshMarkerMaterial.clone();
         sparams.material = this.lineMarkerMaterial.clone();
       }
+        //TODO: add SUrface Length type here
+      else if (type === Measurement.Types.surfaceLength) {
+        this.pnum = 2; // 2 sphere markers
+        this.snum = 1; // 1 line marker
+        this.ptype = Markers.Types.sphere;
+        this.stype = Markers.Types.contour;
+        pparams.material = this.meshMarkerMaterial.clone();
+        sparams.material = this.lineMarkerMaterial.clone();
+      }    
       else if (type === Measurement.Types.angle) {
         this.pnum = 3; // 3 sphere markers
         this.snum = 2; // 2 line marker
@@ -424,8 +435,10 @@ var Measurement = (function() {
       // else if params.p is not an array in the right format, initialize the points
       else if (!Array.isArray(this.params.p) || this.params.p.length !== this.pnum){
         this.params.p = [];
+        this.params.f = [];
 
         for (var p = 0; p < this.pnum; p++) this.params.p.push(null);
+        for (var p = 0; p < this.pnum; p++) this.params.f.push(null);
       }
       // else, params.p is a valid array with the right number of entries
       else {
@@ -486,8 +499,10 @@ var Measurement = (function() {
 
     placePoint: function(intersection) {
       var point = intersection.point;
-
+      var face = intersection.face;
+      console.log(face);
       this.params.p[this.pidx] = point;
+      this.params.f[this.pidx] = face;
       this.pnumactive = Math.min(this.pnum, this.pnumactive + 1);
       this.pidx = (this.pidx + 1) % this.pnum;
 
@@ -517,6 +532,11 @@ var Measurement = (function() {
         // need 2 constraining points
         return this.params.p[0] && this.params.p[1];
       }
+        //TODO: add surface length
+      else if (type === Measurement.Types.surfaceLength) {
+        // need 2 constraining points
+        return this.params.p[0] && this.params.p[1];
+      } 
       else if (type === Measurement.Types.angle) {
         // need 3 constraining points
         return this.params.p[0] && this.params.p[1] && this.params.p[2];
@@ -534,17 +554,6 @@ var Measurement = (function() {
         return this.params.p[0] && this.params.p[1] && this.params.p[2];
       }
       else return true;
-    },
-
-    calculateNoninteractive: function(params) {
-      this.params = params || {};
-      this.params.type = this.params.type || Measurement.Types.length;
-      this.params.normal = this.params.normal || axisToVector3(this.params.axis);
-      this.params.p = this.params.p || [];
-
-      this.calculate();
-
-      return this.result;
     },
 
     calculate: function() {
@@ -568,6 +577,26 @@ var Measurement = (function() {
         if (p0 === null || p1 === null) return;
 
         this.result.length = p0.distanceTo(p1);
+        this.result.ready = true;
+      }
+    //TODO: Add surface Length calculation here
+      else if (type === Measurement.Types.surfaceLength) {
+        var p0 = this.params.p[0];
+        var p1 = this.params.p[1];
+        var f0 = this.params.f[0];
+        var f1 = this.params.f[1];
+        console.log("f0: " + (f0 instanceof THREE.Face3))
+        console.log("f1: " + (f1 instanceof THREE.Face3))
+
+        if (p0 === null || p1 === null) return;
+
+        var surfaceLengthValues = Calculate.surFaceLength(p0, p1, f0, f1, this.pointer.objects)
+        this.result.surfaceLength = surfaceLengthValues.length;
+        console.log(surfaceLengthValues.length)
+        console.log(surfaceLengthValues.shortestPath)
+        this.smarkers[0].setFromVertices(surfaceLengthValues.shortestPath)
+        console.log("mesh buffered: " + this.pointer.objects[0].geometry.isBufferGeometry)
+        //this.smarkers[0].setFromVertices(this.pointer.objects[0].geometry.vertices)
         this.result.ready = true;
       }
       else if (type === Measurement.Types.angle) {
@@ -681,10 +710,8 @@ var Measurement = (function() {
         }
 
         // set the contour marker from the segment array
-        if (this.smarkers && this.smarkers.length > 0) {
-          this.smarkers[0].setFromSegments(segments);
-        }
-
+        this.smarkers[0].setFromSegments(segments);
+        
         // fill the measurement result
         this.result.area = area;
         this.result.boundingBox = boundingBox;
@@ -740,10 +767,6 @@ var Measurement = (function() {
 
     // position secondary markers
     positionSecondaryMarkers: function() {
-      if (!this.smarkers || this.smarkers.length === 0) {
-        return;
-      }
-
       if (this.stype === Markers.Types.line) {
         for (var m = 0; m < this.snum; m++) {
           var ps = this.params.p[(this.pidx + m) % this.pnum];
@@ -874,6 +897,10 @@ var Measurement = (function() {
       if (this.params.type === Measurement.Types.length) {
         result.length *= f;
       }
+        //TODO add surfaceLength here
+      if (this.params.type === Measurement.Types.surfaceLength) {
+        result.length *= f;
+      }    
       else if (this.params.type === Measurement.Types.circle) {
         result.radius *= f;
         result.diameter *= f;
